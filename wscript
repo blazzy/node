@@ -158,6 +158,7 @@ def configure(conf):
       conf_subproject(conf, 'deps/udns', 'LIBS="-lsocket -lnsl" ./configure')
     else:
       conf_subproject(conf, 'deps/udns', './configure')
+    conf_subproject(conf, 'deps/c-ares', './configure')
   else:
     if not conf.check(lib='v8', uselib_store='V8'):
       conf.fatal("Cannot find V8")
@@ -165,6 +166,8 @@ def configure(conf):
       conf.fatal("Cannot find libev")
     if not conf.check(lib='udns', uselib_store='UDNS'):
       conf.fatal("Cannot find udns")
+    if not conf.check(lib='cares', uselib_store='CARES'):
+      conf.fatal("Cannot find c-ares")
 
   conf.define("HAVE_CONFIG_H", 1)
 
@@ -185,6 +188,8 @@ def configure(conf):
   conf.env.append_value('CXXFLAGS', '-D_LARGEFILE_SOURCE')
   conf.env.append_value('CCFLAGS',  '-D_FILE_OFFSET_BITS=64')
   conf.env.append_value('CXXFLAGS', '-D_FILE_OFFSET_BITS=64')
+
+  conf.env.append_value ('LINKFLAGS', '-lrt')
 
   # platform
   platform_def = '-DPLATFORM=' + sys.platform
@@ -237,6 +242,40 @@ def build_udns(bld):
     bld.env_of_name('debug')["LINKFLAGS_UDNS"] = [t]
 
   bld.install_files('${PREFIX}/include/node/', 'deps/udns/udns.h')
+
+
+def build_cares(bld):
+  default_build_dir = bld.srcnode.abspath(bld.env_of_name("default"))
+
+  default_dir = join(default_build_dir, "deps/c-ares")
+
+  static_lib = bld.env["staticlib_PATTERN"] % "cares"
+
+  rule = 'cd "%s" && make && cp .libs/%s ./'
+
+  full_lib_path = join("deps/c-ares/", static_lib)
+
+  default = bld.new_task_gen(
+    target= full_lib_path,
+    rule= rule % (default_dir, static_lib),
+    before= "cxx",
+    install_path= None
+  )
+
+  bld.env["CPPPATH_CARES"] = "deps/c-ares"
+  t = join(bld.srcnode.abspath(bld.env_of_name("default")), default.target)
+  bld.env_of_name('default')["LINKFLAGS_CARES"] = [t]
+
+  if bld.env["USE_DEBUG"]:
+    debug_build_dir = bld.srcnode.abspath(bld.env_of_name("debug"))
+    debug_dir = join(debug_build_dir, "deps/c-ares")
+    debug = default.clone("debug")
+    debug.rule = rule % (debug_dir, static_lib)
+    t = join(bld.srcnode.abspath(bld.env_of_name("debug")), debug.target)
+    bld.env_of_name('debug')["LINKFLAGS_CARES"] = [t]
+
+  bld.install_files('${PREFIX}/include/node/', 'deps/c-ares/*.h')
+
 
 def v8_cmd(bld, variant):
   scons = join(cwd, 'tools/scons/scons.py')
@@ -300,6 +339,7 @@ def build(bld):
   if not bld.env["USE_SYSTEM"]:
     bld.add_subdirs('deps/libeio deps/libev')
     build_udns(bld)
+    build_cares(bld)
     build_v8(bld)
   else:
     bld.add_subdirs('deps/libeio')
@@ -405,6 +445,7 @@ def build(bld):
     src/node_child_process.cc
     src/node_constants.cc
     src/node_dns.cc
+    src/node_cares.cc
     src/node_events.cc
     src/node_file.cc
     src/node_http.cc
@@ -421,6 +462,7 @@ def build(bld):
       deps/v8/include
       deps/libev
       deps/udns
+      deps/c-ares
       deps/libeio
       deps/evcom 
       deps/http_parser
@@ -428,7 +470,7 @@ def build(bld):
     """
     node.add_objects = 'ev eio evcom http_parser coupling'
     node.uselib_local = ''
-    node.uselib = 'GNUTLS GPGERROR UDNS V8 EXECINFO DL KVM SOCKET NSL'
+    node.uselib = 'GNUTLS GPGERROR UDNS CARES V8 EXECINFO DL KVM SOCKET NSL'
   else:
     node.includes = """
       src/
@@ -439,7 +481,7 @@ def build(bld):
     """
     node.add_objects = 'eio evcom http_parser coupling'
     node.uselib_local = 'eio'
-    node.uselib = 'EV GNUTLS GPGERROR UDNS V8 EXECINFO DL KVM SOCKET NSL'
+    node.uselib = 'EV GNUTLS GPGERROR UDNS CARES V8 EXECINFO DL KVM SOCKET NSL'
 
   node.install_path = '${PREFIX}/lib'
   node.install_path = '${PREFIX}/bin'
